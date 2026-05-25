@@ -1,0 +1,29 @@
+# PolyMarket bot config — copy to config.toml and edit. config.toml is git-ignored.
+# Secrets (wallet key) go in .env, NOT here.
+
+# Trading mode: "paper" (default, no wallet) or "live" (requires CLI guard flags).
+mode = "paper"
+
+# Seconds between scan loops.
+scan_interval = 5
+
+[risk]
+# All caps are USDC and freely changeable. Defaults are educational-scale.
+max_total_exposure = 10      # bot opens no new position once cumulative exposure hits this
+max_trade_notional = 5       # max size per single opportunity (<= half total, so >=2 fit)
+min_net_edge_per_share = 0.005   # only act when post-fee edge >= this (USDC/share)
+max_completion_slippage = 0.02   # cap when crossing the spread to complete a one-leg fill
+
+[market_selector]
+# Empty = scan ALL active binary markets.
+# To restrict, set either/both:
+condition_ids = []           # explicit allowlist of market condition ids
+categories = []              # e.g. ["Politics", "Sports"]
+
+[fees]
+# Optional override of the per-category taker feeRate table (the "fees change a lot"
+# escape hatch). Leave empty to use the built-in effective-dated schedule.
+# Example override:
+# [fees.rate_override]
+# Crypto = 0.07
+# Politics = 0.04

@@ -1,0 +1,29 @@
+# Secrets & credentials — NEVER commit
+.env
+.env.*
+!.env.example
+*.key
+.clob_creds.json
+.creds/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Local config with real values
+config.toml
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+nohup.out
