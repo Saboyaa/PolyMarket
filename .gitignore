@@ -1,3 +1,6 @@
+# Parallel-agent git worktrees (kept inside repo so sandboxed agents can reach them)
+.worktrees/
+
 # Secrets & credentials — NEVER commit
 .env
 .env.*
