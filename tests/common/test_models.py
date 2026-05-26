@@ -75,16 +75,33 @@ def test_orderbook_best_bid_and_mid():
     assert book.mid_price(Side.NO) is None  # missing a side -> None
 
 
+def _quote(bid, ask, bid_size="10", ask_size="10"):
+    return Quote(
+        condition_id="c1",
+        bid=Decimal(bid),
+        ask=Decimal(ask),
+        bid_size=Decimal(bid_size),
+        ask_size=Decimal(ask_size),
+    )
+
+
 def test_quote_invariants():
-    q = Quote(condition_id="c1", bid=Decimal("0.40"), ask=Decimal("0.44"), size=Decimal("10"))
+    q = _quote("0.40", "0.44")
     assert q.mid == Decimal("0.42")
     assert q.half_spread == Decimal("0.02")
-    with pytest.raises(ValueError):  # crosses
-        Quote(condition_id="c1", bid=Decimal("0.45"), ask=Decimal("0.44"), size=Decimal("10"))
+    assert q.is_two_sided is True
+    with pytest.raises(ValueError):  # two-sided quote crosses
+        _quote("0.45", "0.44")
     with pytest.raises(ValueError):  # out of (0,1)
-        Quote(condition_id="c1", bid=Decimal("0"), ask=Decimal("0.44"), size=Decimal("10"))
-    with pytest.raises(ValueError):  # nonpositive size
-        Quote(condition_id="c1", bid=Decimal("0.40"), ask=Decimal("0.44"), size=Decimal("0"))
+        _quote("0", "0.44")
+    with pytest.raises(ValueError):  # both sides off
+        _quote("0.40", "0.44", "0", "0")
+
+
+def test_quote_one_sided_allows_crossing_prices():
+    # ask side off: bid may sit above the (unused) ask price without "crossing"
+    q = _quote("0.45", "0.44", bid_size="10", ask_size="0")
+    assert q.is_two_sided is False
 
 
 def test_maker_order_invariants():

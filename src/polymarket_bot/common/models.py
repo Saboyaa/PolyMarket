@@ -132,23 +132,34 @@ class Quote:
     """A two-sided quote on the YES token for one market.
 
     We quote the YES book: a ``bid`` we are willing to buy YES at and an ``ask``
-    we are willing to sell YES at, ``size`` shares each side. The NO side is the
-    mirror (``no_bid = 1 − ask``, ``no_ask = 1 − bid``), since ``NO = 1 − YES``.
+    we are willing to sell YES at, with independent per-side sizes. The NO side is
+    the mirror (``no_bid = 1 − ask``, ``no_ask = 1 − bid``), since ``NO = 1 − YES``.
+
+    A side size of 0 means "don't quote that side" — used when inventory nears the
+    cap and we want to quote only the side that mean-reverts the position. At least
+    one side must have positive size; when both sides are live they must not cross.
     """
 
     condition_id: str
     bid: Decimal  # YES buy price
     ask: Decimal  # YES sell price
-    size: Decimal  # shares quoted per side
+    bid_size: Decimal  # shares to buy YES at bid (0 = side off)
+    ask_size: Decimal  # shares to sell YES at ask (0 = side off)
 
     def __post_init__(self) -> None:
         for name, px in (("bid", self.bid), ("ask", self.ask)):
             if not (Decimal(0) < px < Decimal(1)):
                 raise ValueError(f"{name} must be in (0, 1), got {px}")
-        if self.bid >= self.ask:
+        if self.bid_size < 0 or self.ask_size < 0:
+            raise ValueError("sizes must be >= 0")
+        if self.bid_size == 0 and self.ask_size == 0:
+            raise ValueError("at least one side must have positive size")
+        if self.bid_size > 0 and self.ask_size > 0 and self.bid >= self.ask:
             raise ValueError(f"quote must not cross: bid {self.bid} >= ask {self.ask}")
-        if self.size <= 0:
-            raise ValueError(f"size must be > 0, got {self.size}")
+
+    @property
+    def is_two_sided(self) -> bool:
+        return self.bid_size > 0 and self.ask_size > 0
 
     @property
     def mid(self) -> Decimal:
