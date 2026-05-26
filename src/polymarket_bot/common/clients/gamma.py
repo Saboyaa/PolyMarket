@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from datetime import UTC, datetime
 
 import httpx
 
@@ -188,7 +189,23 @@ def _to_market(raw: dict, *, category: str | None = None) -> Market | None:
         yes_token_id=str(token_ids[0]),
         no_token_id=str(token_ids[1]),
         active=bool(raw.get("active", True)),
+        end_date=_parse_end_date(raw.get("endDate") or raw.get("end_date")),
     )
+
+
+def _parse_end_date(raw: object) -> datetime | None:
+    """Parse Gamma's ISO ``endDate`` (e.g. ``2025-12-31T12:00:00Z``) to UTC.
+
+    Returns ``None`` for missing or unparseable values; a naive datetime is
+    assumed to be UTC. Phase 2 needs this to compute time-to-resolution.
+    """
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
 def _parse_token_ids(raw: dict) -> list[str]:

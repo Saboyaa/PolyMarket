@@ -182,7 +182,18 @@ class FakeClob:
 
     def post_order(self, signed, order_type):
         self.orders.append((signed, order_type))
-        return {"status": "matched", "size": "10", "price": "0.40"}
+        return {"status": "matched", "size": "10", "price": "0.40", "order_type": str(order_type)}
+
+    def cancel(self, order_id):
+        self.cancelled = getattr(self, "cancelled", [])
+        self.cancelled.append(order_id)
+        return {"canceled": [order_id]}
+
+    def get_orders(self):
+        return [{"id": "o1"}]
+
+    def get_trades(self):
+        return [{"id": "t1"}]
 
 
 def test_get_order_book_returns_decimal_levels_sorted():
@@ -219,6 +230,46 @@ def test_place_order_creates_and_posts_buy():
     assert fc.created[0].token_id == "yes_token"
     assert fc.created[0].side == "BUY"
     assert fc.created[0].price == 0.40
+
+
+def test_place_maker_order_honours_buy_sell_and_is_gtc():
+    from py_clob_client.clob_types import OrderType
+
+    from polymarket_bot.common.models import MakerOrder
+
+    fc = FakeClob()
+    client = ClobMarketClient(fc)
+    bid = MakerOrder("c", Side.YES, buy=True, price=Decimal("0.40"), size=Decimal("10"))
+    ask = MakerOrder("c", Side.YES, buy=False, price=Decimal("0.44"), size=Decimal("10"))
+
+    client.place_maker_order(bid, "yes_token")
+    client.place_maker_order(ask, "yes_token")
+
+    assert fc.created[0].side == "BUY"
+    assert fc.created[1].side == "SELL"
+    # both posted as resting GTC orders
+    assert all(ot == OrderType.GTC for _, ot in fc.orders)
+
+
+def test_cancel_and_reads():
+    fc = FakeClob()
+    client = ClobMarketClient(fc)
+    assert client.cancel_order("o1") == {"canceled": ["o1"]}
+    assert fc.cancelled == ["o1"]
+    assert client.get_open_orders() == [{"id": "o1"}]
+    assert client.get_trades() == [{"id": "t1"}]
+
+
+def test_gamma_parses_end_date():
+    from datetime import UTC, datetime
+
+    from polymarket_bot.common.clients.gamma import _to_market
+
+    m = _to_market(dict(MARKET_A, endDate="2025-12-31T12:00:00Z"))
+    assert m.end_date == datetime(2025, 12, 31, 12, 0, tzinfo=UTC)
+    # missing / unparseable -> None
+    assert _to_market(MARKET_A).end_date is None
+    assert _to_market(dict(MARKET_A, endDate="not-a-date")).end_date is None
 
 
 def test_clob_backoff_retries_on_rate_limit(monkeypatch):

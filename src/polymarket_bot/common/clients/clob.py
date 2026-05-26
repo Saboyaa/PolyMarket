@@ -16,7 +16,7 @@ from py_clob_client.exceptions import PolyApiException
 from py_clob_client.order_builder.constants import BUY, SELL
 
 from polymarket_bot.common.auth import CHAIN_ID, CLOB_HOST, ClobCreds
-from polymarket_bot.common.models import Level, Order, OrderBook, Side
+from polymarket_bot.common.models import Level, MakerOrder, Order, OrderBook, Side
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +115,33 @@ class ClobMarketClient:
         )
         signed = self._client.create_order(args)
         return self._with_backoff(self._client.post_order, signed, order_type)
+
+    def place_maker_order(self, order: MakerOrder, token_id: str) -> dict:
+        """Post a resting (GTC) maker limit order. Returns the raw response.
+
+        Unlike :meth:`place_order` (taker, always BUY), this honours
+        ``order.buy`` so the maker can rest both bids and asks.
+        """
+        args = OrderArgs(
+            token_id=token_id,
+            price=float(order.price),
+            size=float(order.size),
+            side=BUY if order.buy else SELL,
+        )
+        signed = self._client.create_order(args)
+        return self._with_backoff(self._client.post_order, signed, OrderType.GTC)
+
+    def cancel_order(self, order_id: str) -> dict:
+        """Cancel a single resting order by its venue id."""
+        return self._with_backoff(self._client.cancel, order_id)
+
+    def get_open_orders(self) -> list:
+        """Return the account's currently open (resting) orders (raw)."""
+        return self._with_backoff(self._client.get_orders)
+
+    def get_trades(self) -> list:
+        """Return recent trades/fills for the account (raw), for reconciliation."""
+        return self._with_backoff(self._client.get_trades)
 
 
 def _levels(raw_levels: list | None, *, ascending: bool) -> tuple[Level, ...]:
