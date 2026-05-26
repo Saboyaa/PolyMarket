@@ -26,6 +26,16 @@ for this review.
       `min_hours_to_resolution` — against real per-market data; the defaults are uncalibrated
       placeholders (see `docs/spec-phase2.md` Open Questions).
 - [ ] Confirm the **tick size** matches each target market (Polymarket varies 0.01 / 0.001).
+      **Finding (paper run, 2026-05-26):** a tick mismatch is dangerous, not just
+      cosmetic — `strategy.build_quotes` clamps prices to `[tick, 1−tick]`, so on a
+      low-priced market quoted on too-coarse a grid (e.g. a 0.0065 market on a 0.01
+      grid) the bid is clamped *up to* 0.01, **above the live ask**, turning the
+      maker into a taker that crosses the book and loses money. Per-market tick size
+      must be fetched/confirmed before quoting; consider refusing to quote when the
+      model's quote would cross the live touch.
+- [ ] Restrict to **mid-range markets** (e.g. 0.05 < p < 0.95): the volume-ranked
+      universe is dominated by longshots (~0) and near-certain (~1) markets that are
+      poor MM targets; the paper-run sampler filters these out.
 
 ### Risk / safety
 - [ ] Confirm the four stops fire as intended on live data: inventory cap, resolution stop,
