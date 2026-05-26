@@ -5,5 +5,13 @@
 """
 
 from polymarket_bot.common.execution.base import ExecutionResult, Executor
+from polymarket_bot.common.execution.live import LiveExecutionError, LiveExecutor
+from polymarket_bot.common.execution.paper import PaperExecutor
 
-__all__ = ["Executor", "ExecutionResult"]
+__all__ = [
+    "Executor",
+    "ExecutionResult",
+    "PaperExecutor",
+    "LiveExecutor",
+    "LiveExecutionError",
+]
