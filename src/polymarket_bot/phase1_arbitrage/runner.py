@@ -72,11 +72,33 @@ class ArbRunner:
         self._clock = clock or date.today
         self._sleep = sleep
         self._total_exposure = Decimal(0)
+        # Running tallies across every scan this run (for hit-rate reporting).
+        self._analyzed = 0  # markets priced on both sides
+        self._gross_arbs = 0  # ask_sum < $1 (before fees)
+        self._actionable = 0  # cleared the post-fee net-edge threshold
+        self._executed = 0  # an order pair actually completed
 
     @property
     def total_exposure(self) -> Decimal:
         """Cumulative USDC committed to completed pairs so far this run."""
         return self._total_exposure
+
+    @property
+    def stats(self) -> dict[str, object]:
+        """Cumulative scenario counts and arbitrage hit rates."""
+
+        def pct(n: int) -> float:
+            return round(100.0 * n / self._analyzed, 4) if self._analyzed else 0.0
+
+        return {
+            "analyzed": self._analyzed,
+            "gross_arbs": self._gross_arbs,
+            "actionable": self._actionable,
+            "executed": self._executed,
+            "gross_arb_pct": pct(self._gross_arbs),
+            "actionable_pct": pct(self._actionable),
+            "executed_pct": pct(self._executed),
+        }
 
     def scan_once(self) -> list[ExecutionResult]:
         """One full pass over the selected markets. Returns what executed."""
@@ -105,6 +127,10 @@ class ArbRunner:
         if ev is None:
             return None  # missing a side; nothing to observe or act on
 
+        self._analyzed += 1
+        if ev.gross_edge_per_share > 0:
+            self._gross_arbs += 1
+
         opp = find_intramarket_arb(
             book,
             self._fees,
@@ -113,6 +139,9 @@ class ArbRunner:
             as_of,
             self._config.fees,
         )
+
+        if opp is not None:
+            self._actionable += 1
 
         result: ExecutionResult | None = None
         # Act only when actionable AND there is exposure headroom left.
@@ -123,6 +152,7 @@ class ArbRunner:
                 executor = self._make_executor(market, book)
                 result = executor.execute(sized)
                 if result.completed:
+                    self._executed += 1
                     self._total_exposure += sized.notional
                     logger.info(
                         "executed %s: size=%s edge/share=%s total_exposure=%s",

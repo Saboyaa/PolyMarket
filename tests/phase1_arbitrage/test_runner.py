@@ -188,6 +188,25 @@ def test_logs_executed_arb(tmp_path):
     assert rec["realized_edge"] is not None
 
 
+def test_stats_track_hit_rate():
+    arb = _market("c1")  # sum 0.95 -> actionable + executed
+    near = _market("c2")  # sum 1.005 -> analyzed but not actionable
+    books = {
+        "c1": _arb_book("c1", "0.40", "0.55"),
+        "c2": _arb_book("c2", "0.50", "0.505"),
+    }
+    ex = FakeExecutor()
+    runner = _runner([arb, near], books, lambda _m, _b: ex)
+
+    runner.scan_once()
+    s = runner.stats
+    assert s["analyzed"] == 2
+    assert s["gross_arbs"] == 1
+    assert s["actionable"] == 1
+    assert s["executed"] == 1
+    assert s["executed_pct"] == 50.0
+
+
 def test_run_bounded_by_max_scans():
     m = _market("c1")
     book = _arb_book("c1", "0.40", "0.55")

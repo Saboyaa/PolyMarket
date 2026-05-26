@@ -108,7 +108,14 @@ def main() -> int:
                 f"yes={o.yes_ask} no={o.no_ask} net_edge/share={r.realized_edge} "
                 f"completed={r.completed} fees={r.total_fees}"
             )
-    print(f"\nTotal simulated exposure committed: {runner.total_exposure} USDC")
+    s = runner.stats
+    print("\n--- Scenario summary ------------------------------------------")
+    print(f"  analyzed markets   : {s['analyzed']}")
+    print(f"  gross arbs (<$1)   : {s['gross_arbs']}  ({s['gross_arb_pct']}% hit)")
+    print(f"  actionable (>fees) : {s['actionable']}  ({s['actionable_pct']}% hit)")
+    print(f"  executed (paper)   : {s['executed']}  ({s['executed_pct']}% hit)")
+    print("---------------------------------------------------------------")
+    print(f"Total simulated exposure committed: {runner.total_exposure} USDC")
     if obs_log is not None:
         from pathlib import Path
 
