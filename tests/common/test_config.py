@@ -53,3 +53,41 @@ def test_negative_cap_rejected(tmp_path: Path):
     p.write_text("[risk]\nmax_total_exposure = -1\n")
     with pytest.raises(ValidationError):
         Config.load(p)
+
+
+def test_mm_defaults():
+    mm = Config().mm
+    assert mm.sigma == Decimal("1.0")
+    assert mm.base_spread == Decimal("0.01")
+    assert mm.target_inventory == Decimal("0")
+    assert mm.max_inventory == Decimal("100")
+    assert mm.tick_size == Decimal("0.01")
+    assert mm.estimate_sigma is False
+
+
+def test_mm_loaded_from_toml(tmp_path: Path):
+    p = tmp_path / "config.toml"
+    p.write_text(
+        "[mm]\n"
+        "sigma = 0.8\n"
+        "base_spread = 0.02\n"
+        "max_inventory = 250\n"
+        "quote_size = 25\n"
+        "estimate_sigma = true\n"
+        "tick_size = 0.001\n"
+    )
+    mm = Config.load(p).mm
+    # money parsed without float drift
+    assert mm.sigma == Decimal("0.8")
+    assert mm.base_spread == Decimal("0.02")
+    assert mm.max_inventory == Decimal("250")
+    assert mm.quote_size == Decimal("25")
+    assert mm.estimate_sigma is True
+    assert mm.tick_size == Decimal("0.001")
+
+
+def test_mm_rejects_nonpositive_sigma(tmp_path: Path):
+    p = tmp_path / "config.toml"
+    p.write_text("[mm]\nsigma = 0\n")
+    with pytest.raises(ValidationError):
+        Config.load(p)

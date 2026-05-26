@@ -82,6 +82,49 @@ class LogConfig(BaseModel):
         return v if isinstance(v, Decimal) else Decimal(str(v))
 
 
+class MarketMakingConfig(BaseModel):
+    """Phase 2 market-making parameters (Black-Scholes binary quoting).
+
+    Quote half-spread is ``base_spread + k_gamma * gamma(p, T) * sigma``; the
+    reservation price is the book mid skewed by ``k_inv * net_inventory`` toward
+    ``target_inventory``. Quoting stops when inventory, time-to-resolution, or
+    gamma crosses its limit. See ``docs/spec-phase2.md``.
+    """
+
+    sigma: Decimal = Field(default=Decimal("1.0"), gt=0)  # log-odds volatility
+    base_spread: Decimal = Field(default=Decimal("0.01"), ge=0)  # floor half-spread
+    k_gamma: Decimal = Field(default=Decimal("0.5"), ge=0)  # gamma -> spread gain
+    k_inv: Decimal = Field(default=Decimal("0.001"), ge=0)  # inventory -> skew gain
+    target_inventory: Decimal = Field(default=Decimal("0"))  # signed YES shares
+    max_inventory: Decimal = Field(default=Decimal("100"), gt=0)  # hard |net_yes| cap
+    quote_size: Decimal = Field(default=Decimal("10"), gt=0)  # shares per side
+    min_hours_to_resolution: Decimal = Field(default=Decimal("6"), ge=0)  # resolution stop
+    gamma_ceiling: Decimal = Field(default=Decimal("5.0"), gt=0)  # gamma stop
+    tick_size: Decimal = Field(default=Decimal("0.01"), gt=0)  # price grid
+    # Volatility estimation (Phase 2 P3): off by default -> use the fixed ``sigma``.
+    estimate_sigma: bool = False
+    sigma_window: int = Field(default=50, gt=0)  # rolling samples
+    sigma_floor: Decimal = Field(default=Decimal("0.1"), gt=0)  # estimate lower bound
+
+    @field_validator(
+        "sigma",
+        "base_spread",
+        "k_gamma",
+        "k_inv",
+        "target_inventory",
+        "max_inventory",
+        "quote_size",
+        "min_hours_to_resolution",
+        "gamma_ceiling",
+        "tick_size",
+        "sigma_floor",
+        mode="before",
+    )
+    @classmethod
+    def _to_decimal(cls, v: object) -> Decimal:
+        return v if isinstance(v, Decimal) else Decimal(str(v))
+
+
 class Config(BaseModel):
     """Top-level config. Load via :meth:`load`."""
 
@@ -91,6 +134,7 @@ class Config(BaseModel):
     market_selector: MarketSelector = Field(default_factory=MarketSelector)
     fees: FeesConfig = Field(default_factory=FeesConfig)
     log: LogConfig = Field(default_factory=LogConfig)
+    mm: MarketMakingConfig = Field(default_factory=MarketMakingConfig)
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> Config:
