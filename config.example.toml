@@ -44,6 +44,11 @@ min_hours_to_resolution = 6  # stop quoting + flatten when closer than this to r
 gamma_ceiling = 51.0         # stop quoting when gamma(p,T)*sigma exceeds this (~1 day out)
 tick_size = 0.01             # price grid; quotes are quantized to this
 
+# Per-market requote cadence: derived from each market's drift vs. its spread
+# (calm markets requote slowly, fast ones often), clamped to this range.
+min_cadence_seconds = 300    # 5 min — fastest requote
+max_cadence_seconds = 172800 # 2 days — slowest requote
+
 # Volatility estimation: when true, the runner refines sigma per market online
 # from its rolling mid history, falling back to the value above on thin history.
 estimate_sigma = true

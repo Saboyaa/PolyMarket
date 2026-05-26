@@ -31,6 +31,31 @@ from polymarket_bot.phase2_market_making.inventory import (
 from polymarket_bot.phase2_market_making.pricing import pin_risk
 
 _HOURS_PER_YEAR = 24.0 * 365.25  # 8766
+_SECONDS_PER_YEAR = _HOURS_PER_YEAR * 3600.0
+
+
+def quote_cadence_seconds(
+    mid: Decimal,
+    sigma: float,
+    half_spread: Decimal,
+    config: MarketMakingConfig,
+) -> float:
+    """Requote interval where expected drift ≈ the quote half-spread.
+
+    A maker quote rests ``half_spread`` from the mid, so it only fills once the
+    mid drifts that far. Price drift over horizon ``h`` (years) is
+    ``≈ p(1−p)·sigma·√h`` (log-odds vol mapped to price by the link slope), so the
+    cadence at which drift equals the spread is ``h = (δ / (p(1−p)·sigma))²``.
+    Calm markets get long cadences, fast ones short; clamped to the config bounds.
+    """
+    lo, hi = float(config.min_cadence_seconds), float(config.max_cadence_seconds)
+    p = float(mid)
+    slope = p * (1.0 - p)
+    if slope <= 0 or sigma <= 0 or half_spread <= 0:
+        return hi
+    sqrt_h_years = float(half_spread) / (slope * sigma)
+    seconds = (sqrt_h_years**2) * _SECONDS_PER_YEAR
+    return min(max(seconds, lo), hi)
 
 
 def _on_grid(price: Decimal, tick: Decimal, rounding: str) -> Decimal:

@@ -19,14 +19,14 @@ import logging
 import time
 from collections import defaultdict, deque
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from polymarket_bot.common.config import Config
 from polymarket_bot.common.execution.maker_base import MakerExecutor
 from polymarket_bot.common.fees import FeeSchedule
 from polymarket_bot.common.models import MakerOrder, Market, OrderBook, Side
-from polymarket_bot.phase2_market_making.strategy import build_quotes
+from polymarket_bot.phase2_market_making.strategy import build_quotes, quote_cadence_seconds
 from polymarket_bot.phase2_market_making.volatility import sigma as resolve_sigma
 
 logger = logging.getLogger(__name__)
@@ -62,11 +62,14 @@ class MMRunner:
         self._mid_history: dict[str, deque[float]] = defaultdict(
             lambda: deque(maxlen=config.mm.sigma_window)
         )
+        # Per-market requote schedule: a market is processed only when due.
+        self._next_due: dict[str, datetime] = {}
         # Running tallies for reporting.
         self._scans = 0
         self._quoted = 0  # markets that produced a live quote
         self._stopped = 0  # markets where a stop pulled quotes
         self._fills = 0
+        self._skipped = 0  # market visits skipped because not yet due
 
     @property
     def total_exposure(self) -> Decimal:
@@ -80,6 +83,7 @@ class MMRunner:
             "quoted": self._quoted,
             "stopped": self._stopped,
             "fills": self._fills,
+            "skipped": self._skipped,
             "total_exposure": self.total_exposure,
             "net_pnl": sum((ex.inventory.net_pnl for ex in self._executors.values()), Decimal(0)),
         }
@@ -97,11 +101,19 @@ class MMRunner:
         return (market.end_date - now).total_seconds() / 3600.0
 
     def scan_once(self) -> None:
-        """One pass over the selected markets."""
+        """One pass over the selected markets, processing only those now due.
+
+        Each market is requoted on its own cadence (derived from its drift vs.
+        spread); markets not yet due are skipped this pass.
+        """
         self._scans += 1
         now = self._clock()
         for market in self._markets.discover_markets(self._config.market_selector):
             if not market.active:
+                continue
+            due = self._next_due.get(market.condition_id)
+            if due is not None and now < due:
+                self._skipped += 1
                 continue
             self._scan_market(market, now)
 
@@ -135,6 +147,8 @@ class MMRunner:
 
         if quote is None:
             self._stopped += 1
+            # Stopped: recheck at the fastest cadence so we resume promptly.
+            self._reschedule(market.condition_id, now, self._config.mm.min_cadence_seconds)
             self._observe(market, book, None, executor)
             return
 
@@ -152,7 +166,12 @@ class MMRunner:
                 )
             self._quoted += 1
 
+        cadence = quote_cadence_seconds(mid, sigma, quote.half_spread, self._config.mm)
+        self._reschedule(market.condition_id, now, cadence)
         self._observe(market, book, quote, executor)
+
+    def _reschedule(self, condition_id: str, now: datetime, cadence_seconds: float) -> None:
+        self._next_due[condition_id] = now + timedelta(seconds=float(cadence_seconds))
 
     def _observe(self, market, book: OrderBook, quote, executor: MakerExecutor) -> None:
         if self._log is None:

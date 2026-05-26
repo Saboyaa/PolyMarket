@@ -89,6 +89,8 @@ def test_fill_updates_inventory_and_count():
     books = FakeBookSource({"c1": _book()})
     r = _runner([_market()], books.books)
     r.scan_once()  # places bid ~0.49 and ask ~0.51
+    # advance past the market's requote cadence so it is processed again
+    r._clock = lambda: _NOW + timedelta(days=10)
     # next scan: ask collapses so the resting bid fills
     books.books["c1"] = _book(mid="0.40")
     r._books = books
@@ -111,6 +113,7 @@ def test_exposure_cap_blocks_new_orders():
     books = FakeBookSource({"c1": _book()})
     r = _runner([_market()], books.books, cfg=cfg)
     r.scan_once()
+    r._clock = lambda: _NOW + timedelta(days=10)  # past the requote cadence
     books.books["c1"] = _book(mid="0.40")  # fills the resting bid (10 shares)
     r._books = books
     r.scan_once()
@@ -139,3 +142,16 @@ def test_run_bounded_by_max_scans():
     r = _runner([_market()], {"c1": _book()})
     r.run(max_scans=3)
     assert r.stats["scans"] == 3
+
+
+def test_market_not_requoted_until_cadence_elapses():
+    r = _runner([_market()], {"c1": _book()})
+    r.scan_once()  # processed: quote placed, next-due scheduled in the future
+    assert r.stats["quoted"] == 1
+    r.scan_once()  # same clock -> not yet due -> skipped
+    assert r.stats["quoted"] == 1
+    assert r.stats["skipped"] == 1
+    # advance past the cadence -> processed again
+    r._clock = lambda: _NOW + timedelta(days=10)
+    r.scan_once()
+    assert r.stats["quoted"] == 2

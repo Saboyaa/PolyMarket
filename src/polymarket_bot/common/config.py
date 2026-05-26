@@ -101,6 +101,9 @@ class MarketMakingConfig(BaseModel):
     min_hours_to_resolution: Decimal = Field(default=Decimal("6"), ge=0)  # resolution stop
     gamma_ceiling: Decimal = Field(default=Decimal("5.0"), gt=0)  # gamma stop
     tick_size: Decimal = Field(default=Decimal("0.01"), gt=0)  # price grid
+    # Per-market requote cadence is derived from drift vs. spread and clamped here.
+    min_cadence_seconds: Decimal = Field(default=Decimal("300"), gt=0)  # 5 min
+    max_cadence_seconds: Decimal = Field(default=Decimal("172800"), gt=0)  # 2 days
     # Volatility estimation (Phase 2 P3): off by default -> use the fixed ``sigma``.
     estimate_sigma: bool = False
     sigma_window: int = Field(default=50, gt=0)  # rolling samples
@@ -117,6 +120,8 @@ class MarketMakingConfig(BaseModel):
         "min_hours_to_resolution",
         "gamma_ceiling",
         "tick_size",
+        "min_cadence_seconds",
+        "max_cadence_seconds",
         "sigma_floor",
         mode="before",
     )
