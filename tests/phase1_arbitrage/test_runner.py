@@ -61,13 +61,14 @@ class FakeExecutor(Executor):
         return Decimal(0)
 
 
-def _runner(markets, books, factory, **risk_kwargs):
+def _runner(markets, books, factory, *, observation_log=None, **risk_kwargs):
     cfg = Config(risk=RiskConfig(**risk_kwargs)) if risk_kwargs else Config()
     return ArbRunner(
         cfg,
         FakeMarketSource(markets),
         FakeBookSource(books),
         factory,
+        observation_log=observation_log,
         clock=lambda: __import__("datetime").date(2026, 5, 25),
         sleep=lambda _s: None,
     )
@@ -147,6 +148,44 @@ def test_book_fetch_error_does_not_kill_loop():
         cfg, FakeMarketSource([m]), ExplodingBooks(), lambda _m, _b: ex, sleep=lambda _s: None
     )
     assert runner.scan_once() == []  # swallowed, no raise
+
+
+def test_logs_near_miss_even_when_not_actionable(tmp_path):
+    import json
+
+    from polymarket_bot.common.observation_log import ObservationLog
+
+    m = _market("c1")
+    # sum 1.005 -> not actionable, but a near miss that must be logged.
+    book = _arb_book("c1", "0.50", "0.505")
+    log = ObservationLog(tmp_path / "s.jsonl", near_miss_gap=Decimal("0.01"))
+    ex = FakeExecutor()
+    runner = _runner([m], {"c1": book}, lambda _m, _b: ex, observation_log=log)
+
+    results = runner.scan_once()
+    assert results == []  # nothing executed
+    assert ex.executed == []
+    rec = json.loads((tmp_path / "s.jsonl").read_text().splitlines()[0])
+    assert rec["condition_id"] == "c1"
+    assert rec["ask_sum"] == "1.005"
+    assert rec["actionable"] is False and rec["executed"] is False
+
+
+def test_logs_executed_arb(tmp_path):
+    import json
+
+    from polymarket_bot.common.observation_log import ObservationLog
+
+    m = _market("c1")
+    book = _arb_book("c1", "0.40", "0.55")  # actionable arb
+    log = ObservationLog(tmp_path / "s.jsonl")
+    ex = FakeExecutor()
+    runner = _runner([m], {"c1": book}, lambda _m, _b: ex, observation_log=log)
+
+    runner.scan_once()
+    rec = json.loads((tmp_path / "s.jsonl").read_text().splitlines()[0])
+    assert rec["actionable"] is True and rec["executed"] is True
+    assert rec["realized_edge"] is not None
 
 
 def test_run_bounded_by_max_scans():

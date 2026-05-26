@@ -25,6 +25,10 @@ build/
 # Local config with real values
 config.toml
 
+# Rolling scan/observation log (analysis data, not source)
+scan_log.jsonl
+*.jsonl
+
 # Editor / OS
 .vscode/
 .idea/

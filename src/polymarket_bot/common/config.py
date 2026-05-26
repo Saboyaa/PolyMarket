@@ -64,6 +64,24 @@ class FeesConfig(BaseModel):
         return {str(k): Decimal(str(val)) for k, val in v.items()}
 
 
+class LogConfig(BaseModel):
+    """Rolling observation log of arbs and near-misses, for later analysis.
+
+    Records (as JSONL) only markets whose ``YES_ask + NO_ask`` is within
+    ``near_miss_gap`` of $1, capped at ``max_records`` (oldest trimmed).
+    """
+
+    enabled: bool = True
+    path: str = "scan_log.jsonl"
+    max_records: int = Field(default=2000, gt=0)
+    near_miss_gap: Decimal = Field(default=Decimal("0.01"), ge=0)
+
+    @field_validator("near_miss_gap", mode="before")
+    @classmethod
+    def _to_decimal(cls, v: object) -> Decimal:
+        return v if isinstance(v, Decimal) else Decimal(str(v))
+
+
 class Config(BaseModel):
     """Top-level config. Load via :meth:`load`."""
 
@@ -72,6 +90,7 @@ class Config(BaseModel):
     risk: RiskConfig = Field(default_factory=RiskConfig)
     market_selector: MarketSelector = Field(default_factory=MarketSelector)
     fees: FeesConfig = Field(default_factory=FeesConfig)
+    log: LogConfig = Field(default_factory=LogConfig)
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> Config:

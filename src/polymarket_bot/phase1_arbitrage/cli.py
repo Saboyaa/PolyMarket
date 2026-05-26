@@ -23,6 +23,7 @@ from polymarket_bot.common.execution.live import LiveExecutor
 from polymarket_bot.common.execution.paper import PaperExecutor
 from polymarket_bot.common.fees import FeeSchedule, leg_fee, resolve_fee_rate
 from polymarket_bot.common.models import Market, OrderBook
+from polymarket_bot.common.observation_log import ObservationLog
 from polymarket_bot.phase1_arbitrage.runner import ArbRunner
 
 logger = logging.getLogger(__name__)
@@ -128,6 +129,17 @@ def _live_factory(
     return factory
 
 
+def build_observation_log(config: Config) -> ObservationLog | None:
+    """Build the rolling scan log from ``config.log`` (None if disabled)."""
+    if not config.log.enabled:
+        return None
+    return ObservationLog(
+        config.log.path,
+        max_records=config.log.max_records,
+        near_miss_gap=config.log.near_miss_gap,
+    )
+
+
 def build_runner(
     config: Config,
     *,
@@ -135,6 +147,7 @@ def build_runner(
     book_source: object | None = None,
     executor_factory: Callable[[Market, OrderBook], Executor] | None = None,
     fees: FeeSchedule | None = None,
+    observation_log: ObservationLog | None = None,
 ) -> ArbRunner:
     """Wire a runner for ``config``. Sources/factory are injectable for tests.
 
@@ -142,6 +155,8 @@ def build_runner(
     importing this module (and running paper unit tests) needs no network.
     """
     fees = fees or FeeSchedule.default()
+    if observation_log is None:
+        observation_log = build_observation_log(config)
 
     if market_source is None:
         from polymarket_bot.common.clients.gamma import GammaClient
@@ -172,7 +187,14 @@ def build_runner(
     if executor_factory is None:
         executor_factory = _paper_factory(config, fees)
 
-    return ArbRunner(config, market_source, book_source, executor_factory, fees=fees)
+    return ArbRunner(
+        config,
+        market_source,
+        book_source,
+        executor_factory,
+        fees=fees,
+        observation_log=observation_log,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

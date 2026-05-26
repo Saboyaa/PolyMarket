@@ -25,8 +25,9 @@ from polymarket_bot.common.config import Config
 from polymarket_bot.common.execution.base import ExecutionResult, Executor
 from polymarket_bot.common.fees import FeeSchedule
 from polymarket_bot.common.models import Market, OrderBook
+from polymarket_bot.common.observation_log import Observation, ObservationLog
 from polymarket_bot.common.risk import apply_caps
-from polymarket_bot.phase1_arbitrage.strategy import find_intramarket_arb
+from polymarket_bot.phase1_arbitrage.strategy import evaluate_book, find_intramarket_arb
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,7 @@ class ArbRunner:
         executor_factory: ExecutorFactory,
         *,
         fees: FeeSchedule | None = None,
+        observation_log: ObservationLog | None = None,
         clock: Callable[[], date] | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -66,6 +68,7 @@ class ArbRunner:
         self._books = book_source
         self._make_executor = executor_factory
         self._fees = fees or FeeSchedule.default()
+        self._log = observation_log
         self._clock = clock or date.today
         self._sleep = sleep
         self._total_exposure = Decimal(0)
@@ -89,10 +92,6 @@ class ArbRunner:
         return results
 
     def _scan_market(self, market: Market, as_of: date) -> ExecutionResult | None:
-        # Stop early if the total-exposure cap is already exhausted.
-        if self._total_exposure >= self._config.risk.max_total_exposure:
-            return None
-
         try:
             book = self._books.get_order_book(
                 market.condition_id, market.yes_token_id, market.no_token_id
@@ -100,6 +99,11 @@ class ArbRunner:
         except Exception:  # noqa: BLE001 - one bad market must not kill the loop
             logger.exception("failed to fetch book for %s", market.condition_id)
             return None
+
+        # Price both legs once; the log and the action decision share these numbers.
+        ev = evaluate_book(book, self._fees, market.category, as_of, self._config.fees)
+        if ev is None:
+            return None  # missing a side; nothing to observe or act on
 
         opp = find_intramarket_arb(
             book,
@@ -109,27 +113,48 @@ class ArbRunner:
             as_of,
             self._config.fees,
         )
-        if opp is None:
-            return None
 
-        sized = apply_caps(opp, self._total_exposure, self._config.risk)
-        if sized is None:
-            return None
+        result: ExecutionResult | None = None
+        # Act only when actionable AND there is exposure headroom left.
+        capped = self._total_exposure >= self._config.risk.max_total_exposure
+        if opp is not None and not capped:
+            sized = apply_caps(opp, self._total_exposure, self._config.risk)
+            if sized is not None:
+                executor = self._make_executor(market, book)
+                result = executor.execute(sized)
+                if result.completed:
+                    self._total_exposure += sized.notional
+                    logger.info(
+                        "executed %s: size=%s edge/share=%s total_exposure=%s",
+                        market.condition_id,
+                        sized.size,
+                        result.realized_edge,
+                        self._total_exposure,
+                    )
+                else:
+                    logger.warning("did not complete %s: %s", market.condition_id, result.note)
 
-        executor = self._make_executor(market, book)
-        result = executor.execute(sized)
-        if result.completed:
-            self._total_exposure += sized.notional
-            logger.info(
-                "executed %s: size=%s edge/share=%s total_exposure=%s",
-                market.condition_id,
-                sized.size,
-                result.realized_edge,
-                self._total_exposure,
-            )
-        else:
-            logger.warning("did not complete %s: %s", market.condition_id, result.note)
+        self._observe(market, ev, actionable=opp is not None, result=result)
         return result
+
+    def _observe(self, market, ev, *, actionable: bool, result: ExecutionResult | None) -> None:
+        if self._log is None:
+            return
+        executed = bool(result and result.completed)
+        self._log.record(
+            Observation(
+                condition_id=market.condition_id,
+                category=market.category,
+                yes_ask=ev.yes_ask,
+                no_ask=ev.no_ask,
+                size=ev.size,
+                gross_edge_per_share=ev.gross_edge_per_share,
+                net_edge_per_share=ev.net_edge_per_share,
+                actionable=actionable,
+                executed=executed,
+                realized_edge=result.realized_edge if result else None,
+            )
+        )
 
     def run(self, max_scans: int | None = None) -> None:
         """Scan repeatedly every ``scan_interval`` seconds.
