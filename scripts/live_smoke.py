@@ -121,7 +121,10 @@ def main() -> int:
 
         logged = Path(cfg.log.path)
         n = len(logged.read_text().splitlines()) if logged.exists() else 0
-        print(f"Scan log: {n} near-miss/arb rows in {cfg.log.path} (analyze with pandas).")
+        print(
+            f"Scan log: {n} near-miss/arb rows in {cfg.log.path} "
+            f"(analyze with: uv run python scripts/analyze_log.py)."
+        )
     return 0
 
 

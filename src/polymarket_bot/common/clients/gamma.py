@@ -1,7 +1,10 @@
 """Market discovery via Polymarket's Gamma REST API.
 
-Gamma is the public, read-only data API used to enumerate markets. We use it to
-discover active binary markets and apply the configured :class:`MarketSelector`
+Gamma is the public, read-only data API used to enumerate markets. We discover
+through the ``/events`` endpoint rather than ``/markets`` because that is where
+categorization lives: the market records themselves return ``category: null``,
+but the parent *event* carries ``tags`` (e.g. ``Politics``, ``Crypto``) we map
+to a market category. We then apply the configured :class:`MarketSelector`
 (condition-id allowlist and/or category filter). An empty selector returns all
 active markets.
 
@@ -27,6 +30,25 @@ _PAGE_LIMIT = 100
 _MAX_RETRIES = 5
 # Gamma rejects paging past this offset with HTTP 422; stop before we hit it.
 _MAX_OFFSET = 10_000
+
+# An event carries several tags, broad and narrow, in no fixed order (e.g.
+# ``['France', 'Politics', 'Macron', 'World']``). Prefer a recognized top-level
+# category so per-category stats stay coarse and comparable; fall back to the
+# first tag, then "Other".
+_CATEGORY_PRIORITY: tuple[str, ...] = (
+    "Politics",
+    "Sports",
+    "Crypto",
+    "Economy",
+    "Business",
+    "Finance",
+    "Tech",
+    "Science",
+    "World",
+    "Elections",
+    "Pop Culture",
+    "Culture",
+)
 
 
 class GammaClient:
@@ -66,8 +88,8 @@ class GammaClient:
             backoff *= 2
         raise RuntimeError("unreachable")  # pragma: no cover
 
-    def _fetch_active_markets(self) -> list[dict]:
-        """Page through active, non-closed markets up to the Gamma offset cap.
+    def _fetch_active_events(self) -> list[dict]:
+        """Page through active, non-closed events up to the Gamma offset cap.
 
         Gamma rejects ``offset`` beyond :data:`_MAX_OFFSET` with HTTP 422, so we
         stop before requesting an out-of-range page; a 422 is also caught
@@ -78,7 +100,7 @@ class GammaClient:
         while offset <= _MAX_OFFSET:
             try:
                 resp = self._get(
-                    "/markets",
+                    "/events",
                     {
                         "active": "true",
                         "closed": "false",
@@ -101,9 +123,23 @@ class GammaClient:
         return out
 
     def discover_markets(self, selector: MarketSelector | None = None) -> list[Market]:
-        """Return active binary markets, filtered by ``selector`` if given."""
+        """Return active binary markets, filtered by ``selector`` if given.
+
+        Markets are flattened out of their parent events, each inheriting the
+        event's derived category. A condition id is emitted once even if it
+        appears under more than one event.
+        """
         selector = selector or MarketSelector()
-        markets = [m for m in (_to_market(raw) for raw in self._fetch_active_markets()) if m]
+        markets: list[Market] = []
+        seen: set[str] = set()
+        for event in self._fetch_active_events():
+            category = _event_category(event)
+            for raw in event.get("markets") or []:
+                market = _to_market(raw, category=category)
+                if market is None or market.condition_id in seen:
+                    continue
+                seen.add(market.condition_id)
+                markets.append(market)
         if selector.selects_all:
             return markets
         return [m for m in markets if _matches(m, selector)]
@@ -117,16 +153,38 @@ def _matches(market: Market, selector: MarketSelector) -> bool:
     return True
 
 
-def _to_market(raw: dict) -> Market | None:
-    """Map a Gamma market record to our :class:`Market`, or None if not binary."""
+def _event_category(event: dict) -> str:
+    """Derive a coarse category from an event's tags.
+
+    Returns the first tag matching :data:`_CATEGORY_PRIORITY` (case-insensitive),
+    else the first tag's label, else ``"Other"``.
+    """
+    labels = [str(t.get("label", "")).strip() for t in (event.get("tags") or [])]
+    labels = [label for label in labels if label]
+    if not labels:
+        return "Other"
+    lowered = {label.lower(): label for label in labels}
+    for preferred in _CATEGORY_PRIORITY:
+        if preferred.lower() in lowered:
+            return preferred
+    return labels[0]
+
+
+def _to_market(raw: dict, *, category: str | None = None) -> Market | None:
+    """Map a Gamma market record to our :class:`Market`, or None if not binary.
+
+    ``category`` overrides the (typically null) per-market category with one
+    derived from the parent event; it falls back to the record's own field.
+    """
     condition_id = raw.get("conditionId") or raw.get("condition_id")
     token_ids = _parse_token_ids(raw)
     if not condition_id or len(token_ids) != 2:
         return None
+    resolved_category = category or str(raw.get("category", "") or "Other")
     return Market(
         condition_id=str(condition_id),
         question=str(raw.get("question", "")),
-        category=str(raw.get("category", "") or "Other"),
+        category=resolved_category,
         yes_token_id=str(token_ids[0]),
         no_token_id=str(token_ids[1]),
         active=bool(raw.get("active", True)),

@@ -45,12 +45,21 @@ MARKET_NONBINARY = {
 }
 
 
+def _event(market: dict) -> dict:
+    """Wrap a market dict in a parent event, exposing its category as a tag."""
+    cat = market.get("category")
+    return {"tags": [{"label": cat}] if cat else [], "markets": [market]}
+
+
 def _gamma_with(markets: list[dict], capture: list | None = None) -> GammaClient:
+    """Mock the ``/events`` endpoint, one event per supplied market."""
+    events = [_event(m) for m in markets]
+
     def handler(request: httpx.Request) -> httpx.Response:
         if capture is not None:
             capture.append(request)
         offset = int(request.url.params.get("offset", "0"))
-        page = markets if offset == 0 else []
+        page = events if offset == 0 else []
         return httpx.Response(200, json=page)
 
     transport = httpx.MockTransport(handler)
@@ -92,7 +101,7 @@ def test_gamma_stops_on_422_offset_overflow():
     Gamma returns HTTP 422 once ``offset`` runs past its ceiling; pagination
     should treat that as end-of-results, not raise.
     """
-    full_page = [dict(MARKET_A, conditionId=f"0x{i}") for i in range(100)]
+    full_page = [_event(dict(MARKET_A, conditionId=f"0x{i}")) for i in range(100)]
 
     def handler(request: httpx.Request) -> httpx.Response:
         offset = int(request.url.params.get("offset", "0"))
@@ -108,7 +117,7 @@ def test_gamma_stops_on_422_offset_overflow():
 
 def test_gamma_does_not_page_past_offset_ceiling():
     """Pagination must stop at the offset cap rather than request beyond it."""
-    full_page = [dict(MARKET_A, conditionId=f"0x{i}") for i in range(100)]
+    full_page = [_event(dict(MARKET_A, conditionId=f"0x{i}")) for i in range(100)]
     seen_offsets: list[int] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -119,6 +128,24 @@ def test_gamma_does_not_page_past_offset_ceiling():
     g = GammaClient(client=client)
     g.discover_markets()
     assert max(seen_offsets) <= 10_000  # never requests an out-of-range offset
+
+
+def test_category_comes_from_event_tags():
+    """Markets inherit a coarse category from their parent event's tags."""
+    from polymarket_bot.common.clients.gamma import _event_category
+
+    # Picks the recognized top-level tag, not the first/narrow one.
+    assert _event_category({"tags": [{"label": "France"}, {"label": "Politics"}]}) == "Politics"
+    # No recognized tag -> first label; no tags at all -> "Other".
+    assert _event_category({"tags": [{"label": "Memecoins"}]}) == "Memecoins"
+    assert _event_category({"tags": []}) == "Other"
+    assert _event_category({}) == "Other"
+
+
+def test_discover_inherits_event_category():
+    g = _gamma_with([MARKET_A])  # MARKET_A category "Crypto" -> tag
+    markets = g.discover_markets()
+    assert markets[0].category == "Crypto"
 
 
 def test_gamma_queries_active_nonclosed():
