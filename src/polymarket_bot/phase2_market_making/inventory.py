@@ -13,7 +13,9 @@ from dataclasses import replace
 from decimal import Decimal
 
 from polymarket_bot.common.config import MarketMakingConfig
-from polymarket_bot.common.models import InventoryState, Side
+from polymarket_bot.common.models import InventoryState, MakerOrder, Side
+
+_REBATE_QUANTUM = Decimal("0.00001")
 
 
 def position_delta(side: Side, *, buy: bool, size: Decimal) -> Decimal:
@@ -40,6 +42,32 @@ def apply_fill(
         inv,
         net_yes=inv.net_yes + position_delta(side, buy=buy, size=size),
         fees_paid=inv.fees_paid + fee,
+    )
+
+
+def settle_fill(
+    inv: InventoryState,
+    order: MakerOrder,
+    *,
+    price: Decimal,
+    size: Decimal,
+    fee: Decimal,
+    rebate_fraction: Decimal,
+) -> InventoryState:
+    """Apply a maker fill: position, fee, signed cash flow, and maker rebate.
+
+    Shared by the paper and live maker executors so their PnL accounting is
+    identical. ``realized_pnl`` is signed cash flow (buy pays out, sell takes in),
+    so a flat round-trip equals the spread captured.
+    """
+    inv = apply_fill(inv, order.side, buy=order.buy, size=size, fee=fee)
+    cash = price * size
+    cash_flow = -cash if order.buy else cash
+    rebate = (rebate_fraction * fee).quantize(_REBATE_QUANTUM)
+    return replace(
+        inv,
+        realized_pnl=inv.realized_pnl + cash_flow,
+        rebates_earned=inv.rebates_earned + rebate,
     )
 
 

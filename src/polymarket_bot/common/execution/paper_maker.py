@@ -25,7 +25,7 @@ from decimal import Decimal
 from polymarket_bot.common.execution.maker_base import MakerExecutor
 from polymarket_bot.common.fees import FeeSchedule, leg_fee, rebate_rate, resolve_fee_rate
 from polymarket_bot.common.models import Fill, InventoryState, MakerOrder, OrderBook
-from polymarket_bot.phase2_market_making.inventory import apply_fill
+from polymarket_bot.phase2_market_making.inventory import settle_fill
 
 
 class PaperMakerExecutor(MakerExecutor):
@@ -102,12 +102,11 @@ class PaperMakerExecutor(MakerExecutor):
         )
 
     def _settle(self, order: MakerOrder, fill: Fill) -> None:
-        inv = apply_fill(self._inv, order.side, buy=order.buy, size=fill.size, fee=fill.fee)
-        cash = fill.price * fill.size
-        cash_flow = -cash if order.buy else cash  # buy pays out, sell takes in
-        rebate = (self._rebate_rate * fill.fee).quantize(Decimal("0.00001"))
-        self._inv = replace(
-            inv,
-            realized_pnl=inv.realized_pnl + cash_flow,
-            rebates_earned=inv.rebates_earned + rebate,
+        self._inv = settle_fill(
+            self._inv,
+            order,
+            price=fill.price,
+            size=fill.size,
+            fee=fill.fee,
+            rebate_fraction=self._rebate_rate,
         )

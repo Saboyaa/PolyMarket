@@ -6,6 +6,7 @@
 
 from polymarket_bot.common.execution.base import ExecutionResult, Executor
 from polymarket_bot.common.execution.live import LiveExecutionError, LiveExecutor
+from polymarket_bot.common.execution.live_maker import LiveMakerExecutor
 from polymarket_bot.common.execution.maker_base import MakerExecutor
 from polymarket_bot.common.execution.paper import PaperExecutor
 from polymarket_bot.common.execution.paper_maker import PaperMakerExecutor
@@ -18,4 +19,5 @@ __all__ = [
     "LiveExecutionError",
     "MakerExecutor",
     "PaperMakerExecutor",
+    "LiveMakerExecutor",
 ]
