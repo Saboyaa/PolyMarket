@@ -66,7 +66,8 @@ def main() -> int:
     for cat, c in sorted(by_cat.items(), key=lambda kv: -kv[1]["n"]):
         print(
             f"  {cat[:16]:16} {c['n']:>6} "
-            f"{c['arb']:>4} ({_pct(c['arb'], c['n']):>7}) {c['act']:>4} ({_pct(c['act'], c['n']):>7})"
+            f"{c['arb']:>4} ({_pct(c['arb'], c['n']):>7}) "
+            f"{c['act']:>4} ({_pct(c['act'], c['n']):>7})"
         )
 
     # --- Closest to an arbitrage -------------------------------------------
