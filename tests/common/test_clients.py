@@ -86,6 +86,41 @@ def test_selector_category_filter():
     assert [m.condition_id for m in markets] == ["0xA"]
 
 
+def test_gamma_stops_on_422_offset_overflow():
+    """A full catalog deeper than the offset cap must not crash (regression).
+
+    Gamma returns HTTP 422 once ``offset`` runs past its ceiling; pagination
+    should treat that as end-of-results, not raise.
+    """
+    full_page = [dict(MARKET_A, conditionId=f"0x{i}") for i in range(100)]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        offset = int(request.url.params.get("offset", "0"))
+        if offset == 0:
+            return httpx.Response(200, json=full_page)  # full -> client pages on
+        return httpx.Response(422, json={"error": "offset out of range"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="https://gamma.test")
+    g = GammaClient(client=client)
+    markets = g.discover_markets()
+    assert len(markets) == 100  # first page kept; 422 stopped pagination cleanly
+
+
+def test_gamma_does_not_page_past_offset_ceiling():
+    """Pagination must stop at the offset cap rather than request beyond it."""
+    full_page = [dict(MARKET_A, conditionId=f"0x{i}") for i in range(100)]
+    seen_offsets: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_offsets.append(int(request.url.params.get("offset", "0")))
+        return httpx.Response(200, json=full_page)  # always full -> would loop forever
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url="https://gamma.test")
+    g = GammaClient(client=client)
+    g.discover_markets()
+    assert max(seen_offsets) <= 10_000  # never requests an out-of-range offset
+
+
 def test_gamma_queries_active_nonclosed():
     captured: list[httpx.Request] = []
     g = _gamma_with([MARKET_A], capture=captured)

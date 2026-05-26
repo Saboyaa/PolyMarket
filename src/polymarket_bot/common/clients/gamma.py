@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 GAMMA_HOST = "https://gamma-api.polymarket.com"
 _PAGE_LIMIT = 100
 _MAX_RETRIES = 5
+# Gamma rejects paging past this offset with HTTP 422; stop before we hit it.
+_MAX_OFFSET = 10_000
 
 
 class GammaClient:
@@ -65,19 +67,30 @@ class GammaClient:
         raise RuntimeError("unreachable")  # pragma: no cover
 
     def _fetch_active_markets(self) -> list[dict]:
-        """Page through all active, non-closed markets."""
+        """Page through active, non-closed markets up to the Gamma offset cap.
+
+        Gamma rejects ``offset`` beyond :data:`_MAX_OFFSET` with HTTP 422, so we
+        stop before requesting an out-of-range page; a 422 is also caught
+        defensively (in case the cap shifts) and treated as end-of-results.
+        """
         out: list[dict] = []
         offset = 0
-        while True:
-            resp = self._get(
-                "/markets",
-                {
-                    "active": "true",
-                    "closed": "false",
-                    "limit": _PAGE_LIMIT,
-                    "offset": offset,
-                },
-            )
+        while offset <= _MAX_OFFSET:
+            try:
+                resp = self._get(
+                    "/markets",
+                    {
+                        "active": "true",
+                        "closed": "false",
+                        "limit": _PAGE_LIMIT,
+                        "offset": offset,
+                    },
+                )
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 422:
+                    logger.warning("Gamma offset %d out of range; stopping pagination", offset)
+                    break
+                raise
             page = resp.json()
             if not page:
                 break
