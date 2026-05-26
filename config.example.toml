@@ -30,18 +30,22 @@ categories = []              # e.g. ["Politics", "Sports"]
 
 [mm]
 # Phase 2 market making (Black-Scholes binary quoting). See docs/spec-phase2.md.
-sigma = 1.0                  # volatility of the log-odds ln(p/(1-p)); drives spread
-base_spread = 0.01           # floor half-spread (USDC/share) added on top of gamma term
-k_gamma = 0.5                # gain: half-spread widens by k_gamma * gamma(p,T) * sigma
+# Values below are calibrated from real data via scripts/calibrate_mm.py (liquid
+# markets >14 days from resolution, mid-range prices). Re-run it to refresh —
+# vol shifts with the market regime, and sports/short-dated markets are excluded.
+sigma = 6.7                  # median annualized log-odds vol ln(p/(1-p)); drives spread
+base_spread = 0.005          # floor half-spread (USDC/share) added on top of gamma term
+k_gamma = 0.0008             # gain: half-spread widens by k_gamma * gamma(p,T) * sigma
 k_inv = 0.001                # gain: reservation price skews by k_inv * net_inventory
 target_inventory = 0         # desired signed YES position (shares); quotes mean-revert to it
 max_inventory = 100          # hard cap on |net YES shares|; never quote past it
 quote_size = 10              # shares quoted per side
 min_hours_to_resolution = 6  # stop quoting + flatten when closer than this to resolution
-gamma_ceiling = 5.0          # stop quoting when gamma(p,T) exceeds this
+gamma_ceiling = 51.0         # stop quoting when gamma(p,T)*sigma exceeds this (~1 day out)
 tick_size = 0.01             # price grid; quotes are quantized to this
 
-# Volatility estimation: off => use the fixed sigma above.
-estimate_sigma = false
+# Volatility estimation: when true, the runner refines sigma per market online
+# from its rolling mid history, falling back to the value above on thin history.
+estimate_sigma = true
 sigma_window = 50            # rolling samples used when estimate_sigma = true
 sigma_floor = 0.1            # lower bound on the estimated sigma
